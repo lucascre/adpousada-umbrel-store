@@ -7,6 +7,7 @@ on:
       - "adpousada-gravador/Dockerfile"
       - "adpousada-gravador/gravador.mjs"
       - "adpousada-gravador/umbrel-app.yml"
+      - ".github/workflows/gravador.yml"
   workflow_dispatch:
 
 permissions:
