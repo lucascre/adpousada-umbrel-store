@@ -16,8 +16,8 @@ Grava a live direto para o acervo. Gravar e parar ficam no painel do site
 (`/api/gravador`), então nada no Umbrel precisa ser exposto na internet.
 
 Caminho do culto: HLS do Restreamer → pedaços `.ts` (sobrevivem a queda da
-live e a reinício do app) → MP4 com `faststart` → cópia para
-`acervo/cultos/` (cópia direta no disco) → o site cadastra o `Titulo` tipo culto, já publicado.
+live e a reinício do app) → MP4 com `faststart` → cópia direta no disco
+para `acervo/cultos/` → o site cadastra o `Titulo` tipo culto, já publicado.
 
 Variáveis que precisam ser definidas no Umbrel depois de instalar:
 
