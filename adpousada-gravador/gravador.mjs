@@ -19,7 +19,7 @@
 
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 
@@ -31,6 +31,9 @@ const cfg = {
   pasta: (process.env.COPYPARTY_PASTA || "acervo/cultos").replace(/^\/+|\/+$/g, ""),
   senha: process.env.COPYPARTY_SENHA || "",
   dir: process.env.DIR_GRAVACOES || "/data/gravacoes",
+  // A pasta de cultos montada direto no contêiner. Com ela, o MP4 é copiado
+  // no disco e o copyparty não entra no caminho (nem a senha dele).
+  destino: process.env.DESTINO_DIR || "",
   intervalo: Number(process.env.INTERVALO_SEGUNDOS || 5) * 1000,
   porta: Number(process.env.PORT || 8080),
 };
@@ -200,6 +203,20 @@ function nomeDoArquivo(meta) {
 }
 
 async function enviar(arquivo, nome) {
+  if (cfg.destino) {
+    // Pasta que não existe é montagem que faltou: gravar ali perderia o culto
+    // dentro do contêiner, sem ninguém ver.
+    await stat(cfg.destino).catch(() => {
+      throw new Error(`DESTINO_DIR ${cfg.destino} não está montado.`);
+    });
+    // Copia com outro nome e só então renomeia: quem abrir a pasta no meio da
+    // cópia não vê um culto pela metade.
+    const parcial = join(cfg.destino, `.${nome}.parcial`);
+    await copyFile(arquivo, parcial);
+    await rename(parcial, join(cfg.destino, nome));
+    return;
+  }
+
   const { size } = await stat(arquivo);
   const r = await fetch(`${cfg.copyparty}/${cfg.pasta}/${nome}`, {
     method: "PUT",
@@ -238,7 +255,7 @@ async function finalizar(dir) {
 
     ocupado = "enviando";
     await enviar(mp4, nome);
-    registrar(`enviado ao acervo: ${cfg.pasta}/${nome}`);
+    registrar(`guardado no acervo: ${cfg.pasta}/${nome}`);
 
     feito = { nome, duracao };
     // Gravado antes de avisar o site: se o aviso falhar, a próxima tentativa
@@ -342,7 +359,7 @@ createServer((req, res) => {
   }
   const s = situacao();
   const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
-  const faltando = [!cfg.token && "GRAVADOR_TOKEN", !cfg.live && "LIVE_URL", !cfg.senha && "COPYPARTY_SENHA"].filter(Boolean);
+  const faltando = [!cfg.token && "GRAVADOR_TOKEN", !cfg.live && "LIVE_URL", !cfg.destino && !cfg.senha && "DESTINO_DIR ou COPYPARTY_SENHA"].filter(Boolean);
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <meta http-equiv=refresh content=5><title>Gravador</title>

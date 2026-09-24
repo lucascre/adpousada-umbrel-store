@@ -2,7 +2,7 @@ manifestVersion: 1
 id: adpousada-gravador
 category: media
 name: AD Pousada Gravador
-version: "1.0.1"
+version: "1.0.2"
 tagline: Grava a live do culto direto para o acervo
 description: >-
   Grava a transmissão ao vivo da AD Pousada no próprio servidor e, ao parar,
@@ -24,6 +24,6 @@ gallery: []
 path: ""
 defaultUsername: ""
 defaultPassword: ""
-releaseNotes: "Avisa no painel quando nada está chegando da live durante a gravação."
+releaseNotes: "Grava o culto direto na pasta acervo/cultos, sem depender da senha do copyparty. Avisa no painel quando nada chega da live."
 submitter: AD Pousada
 submission: https://github.com/lucascre/adpousada-umbrel-store
