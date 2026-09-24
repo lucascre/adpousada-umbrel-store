@@ -1,0 +1,29 @@
+manifestVersion: 1
+id: adpousada-gravador
+category: media
+name: AD Pousada Gravador
+version: "1.0.0"
+tagline: Grava a live do culto direto para o acervo
+description: >-
+  Grava a transmissão ao vivo da AD Pousada no próprio servidor e, ao parar,
+  guarda o culto no acervo (pasta acervo/cultos do copyparty) e o cadastra em
+  Cultos gravados no site. Gravar e parar são feitos pelo painel do site, em
+  Audiência; esta tela só mostra o que o gravador está fazendo.
+
+
+  Configuração (variáveis do app): GRAVADOR_TOKEN (o mesmo da Vercel),
+  LIVE_URL (o .m3u8 do canal no Restreamer) e COPYPARTY_SENHA (conta com
+  permissão de escrita no acervo).
+developer: AD Pousada
+website: https://www.adpousada.com.br
+dependencies: []
+repo: https://github.com/lucascre/adpousada-umbrel-store
+support: https://www.adpousada.com.br
+port: 8340
+gallery: []
+path: ""
+defaultUsername: ""
+defaultPassword: ""
+releaseNotes: ""
+submitter: AD Pousada
+submission: https://github.com/lucascre/adpousada-umbrel-store
