@@ -2,7 +2,7 @@ manifestVersion: 1
 id: adpousada-gravador
 category: media
 name: AD Pousada Gravador
-version: "1.0.3"
+version: "1.0.4"
 tagline: Grava a live do culto direto para o acervo
 description: >-
   Grava a transmissão ao vivo da AD Pousada no próprio servidor e, ao parar,

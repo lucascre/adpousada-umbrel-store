@@ -37,6 +37,14 @@ está certa.
 escrita do `.env.local` não existe no copyparty (verificado em 24/09/2026:
 403 em qualquer pasta).
 
+**Código novo exige versão nova.** O gravador roda da imagem
+`ghcr.io/lucascre/adpousada-gravador:<versão>`, que o workflow
+`.github/workflows/gravador.yml` publica a cada push. Para soltar uma mudança:
+subir `version` no `umbrel-app.yml` **e** a tag da imagem no
+`docker-compose.yml`, esperar o workflow terminar, e só então atualizar o app
+no Umbrel. (Montar o `gravador.mjs` da pasta do app não serve: o Umbrel não
+troca esse arquivo nas atualizações.)
+
 Testado em 24/09/2026 num contêiner `node:22-alpine` com live, site e
 copyparty simulados: live derrubada por 10 s no meio da gravação, e o MP4 final
 saiu inteiro (h264 + aac), subiu e foi cadastrado uma vez só.

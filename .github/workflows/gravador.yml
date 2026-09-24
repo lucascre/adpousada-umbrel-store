@@ -1,0 +1,42 @@
+name: Imagem do gravador
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "adpousada-gravador/Dockerfile"
+      - "adpousada-gravador/gravador.mjs"
+      - "adpousada-gravador/umbrel-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A tag da imagem é a versão do app: o docker-compose.yml aponta para
+      # ela, então subir a versão no umbrel-app.yml é o que publica código novo.
+      - name: Versão
+        id: versao
+        run: echo "v=$(sed -nE 's/^version: \"?([^\"]+)\"?$/\1/p' adpousada-gravador/umbrel-app.yml)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: adpousada-gravador
+          platforms: linux/amd64
+          push: true
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          tags: |
+            ghcr.io/lucascre/adpousada-gravador:${{ steps.versao.outputs.v }}
+            ghcr.io/lucascre/adpousada-gravador:latest
