@@ -25,13 +25,13 @@ Variáveis que precisam ser definidas no Umbrel depois de instalar:
 |---|---|
 | `GRAVADOR_TOKEN` | o mesmo valor configurado na Vercel |
 | `LIVE_URL` | `http://192.168.0.160:8135/memfs/<id-do-canal>.m3u8` |
-| `DESTINO_DIR` | `/acervo/cultos`, junto com a montagem abaixo |
 
-E uma montagem própria (configurações do app → armazenamento): origem
-`/Apps/copyparty/data/media/acervo/cultos`, destino `/acervo/cultos`. O MP4 é
-gravado direto no disco do acervo; o copyparty só serve. Sem a montagem o
-gravador recusa guardar (e mantém o arquivo), em vez de gravar dentro do
-contêiner e perder o culto.
+A pasta `acervo/cultos` do copyparty já vem montada pelo `docker-compose.yml`
+(`${UMBREL_ROOT}/app-data/copyparty/...`), com `DESTINO_DIR=/acervo/cultos`. As
+configurações do Umbrel não servem para isso: só aceitam montagem vinda de
+`/Home`, de disco externo ou de rede. Ao ligar, o gravador cria
+`acervo/cultos/.gravador-conectado`; se esse arquivo aparecer ali, a montagem
+está certa.
 
 `COPYPARTY_SENHA` só é usada se `DESTINO_DIR` ficar vazio — e a senha de
 escrita do `.env.local` não existe no copyparty (verificado em 24/09/2026:

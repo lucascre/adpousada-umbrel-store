@@ -16,9 +16,14 @@ services:
     volumes:
       - ${APP_DATA_DIR}/gravador.mjs:/app/gravador.mjs:ro
       - ${APP_DATA_DIR}/data:/data
+      # A pasta de cultos do acervo, que pertence ao copyparty. O Umbrel não
+      # deixa montar pasta de outro app pelas configurações (só /Home), então
+      # vai aqui. Gravar direto no disco dispensa a senha de escrita dele.
+      - ${UMBREL_ROOT}/app-data/copyparty/data/media/acervo/cultos:/acervo/cultos
     environment:
       PORT: 8080
       SITE_URL: https://www.adpousada.com.br
       COPYPARTY_URL: http://192.168.0.160:3923
       COPYPARTY_PASTA: acervo/cultos
       DIR_GRAVACOES: /data/gravacoes
+      DESTINO_DIR: /acervo/cultos

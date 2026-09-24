@@ -375,4 +375,15 @@ ${faltando.length ? `<p class=a>Falta configurar: ${faltando.join(", ")}</p>` : 
 }).listen(cfg.porta, () => registrar(`status em :${cfg.porta}`));
 
 if (!cfg.token) registrar("GRAVADOR_TOKEN ausente — o site vai recusar tudo.");
+
+// Marca a pasta de destino ao ligar. Se a montagem apontar para o lugar
+// errado, o Docker cria uma pasta vazia e tudo "funciona" — só que os cultos
+// vão parar onde ninguém procura. O marcador deixa isso conferível pela
+// pasta do acervo.
+if (cfg.destino) {
+  writeFile(join(cfg.destino, ".gravador-conectado"), `${new Date().toISOString()}
+`)
+    .then(() => registrar(`destino ${cfg.destino} gravável`))
+    .catch((e) => registrar(`destino ${cfg.destino} NÃO gravável: ${e.message}`));
+}
 ciclo();
