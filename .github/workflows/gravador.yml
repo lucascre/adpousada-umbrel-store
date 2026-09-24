@@ -23,7 +23,10 @@ jobs:
       # ela, então subir a versão no umbrel-app.yml é o que publica código novo.
       - name: Versão
         id: versao
-        run: echo "v=$(sed -nE 's/^version: \"?([^\"]+)\"?$/\1/p' adpousada-gravador/umbrel-app.yml)" >> "$GITHUB_OUTPUT"
+        run: |
+          v=$(sed -nE 's/^version: "?([^"]+)"?$/\1/p' adpousada-gravador/umbrel-app.yml)
+          test -n "$v"
+          echo "v=$v" >> "$GITHUB_OUTPUT"
 
       - uses: docker/login-action@v3
         with:
