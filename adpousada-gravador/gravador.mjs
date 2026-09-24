@@ -75,13 +75,26 @@ function situacao() {
       estado: "gravando",
       desde: atual.inicio,
       segundos: Math.floor((Date.now() - new Date(atual.inicio).getTime()) / 1000),
-      mensagem: atual.proc ? null : "A live está fora do ar; volto a gravar assim que ela voltar.",
+      mensagem: semSinal() ? "Nada chegando da live: ela está fora do ar? A gravação continua assim que ela voltar." : null,
       ultimo,
     };
   }
   if (ocupado) return { estado: ocupado, ultimo };
   if (ultimoErro) return { estado: "erro", mensagem: ultimoErro, ultimo };
   return { estado: "parado", ultimo };
+}
+
+/** Há mais de 20 s nenhum byte novo entra no arquivo. */
+function semSinal() {
+  return Date.now() - atual.recebendoEm > 20_000;
+}
+
+/** Confere se o pedaço atual cresceu desde o último ciclo. */
+async function medirSinal() {
+  if (!atual?.arquivo) return;
+  const tamanho = await stat(atual.arquivo).then((s) => s.size, () => 0);
+  if (tamanho > atual.tamanho) atual.recebendoEm = Date.now();
+  atual.tamanho = tamanho;
 }
 
 // ─── ffmpeg ──────────────────────────────────────────────────────────────────
@@ -129,6 +142,8 @@ function abrirPedaco() {
     if (atual && atual.proc === proc) atual.proc = null;
   });
   atual.proc = proc;
+  atual.arquivo = arquivo;
+  atual.tamanho = 0;
   registrar(`gravando pedaço ${atual.parte}`);
 }
 
@@ -152,7 +167,9 @@ async function iniciar(pedido, continuar) {
   await writeFile(join(dir, "meta.json"), JSON.stringify(meta));
 
   const partes = (await readdir(dir)).filter((f) => f.endsWith(".ts")).length;
-  atual = { ...meta, dir, parte: partes, proc: null };
+  // recebendoEm começa agora: os primeiros 20 s são de tolerância, o tempo de
+  // o ffmpeg abrir a live.
+  atual = { ...meta, dir, parte: partes, proc: null, arquivo: null, tamanho: 0, recebendoEm: Date.now() };
   ultimoErro = null;
   registrar(`${continuar ? "retomando" : "iniciando"} gravação "${meta.titulo}"`);
   abrirPedaco();
@@ -306,6 +323,7 @@ async function ciclo() {
     // A live caiu no meio: abre outro pedaço (o ffmpeg falha rápido se ela
     // ainda estiver fora, e a gente tenta de novo no próximo ciclo).
     if (atual && !atual.proc) abrirPedaco();
+    await medirSinal();
 
     await site("POST", { tipo: "situacao", ...situacao() });
   } catch (e) {
