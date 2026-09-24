@@ -37,6 +37,18 @@ está certa.
 escrita do `.env.local` não existe no copyparty (verificado em 24/09/2026:
 403 em qualquer pasta).
 
+### Envio de arquivos do painel (1.1.0)
+
+O mesmo app recebe os vídeos e imagens que o painel do AD Play manda
+(`envio.mjs`), na porta **8341**, fora do login do Umbrel. Quem protege é a
+permissão que o site assina com o `GRAVADOR_TOKEN` (pasta + validade de 6 h).
+Os arquivos chegam em pedaços de 50 MB — a Cloudflare recusa requisição acima
+de 100 MB — e o envio retoma de onde parou se a conexão cair.
+
+Publicado pelo túnel em `midia.adpousada.com.br`, rota `^/envio` →
+`http://192.168.0.160:8341`. No site, `ENVIO_URL` aponta para lá (padrão
+`https://midia.adpousada.com.br/envio`).
+
 **Código novo exige versão nova.** O gravador roda da imagem
 `ghcr.io/lucascre/adpousada-gravador:<versão>`, que o workflow
 `.github/workflows/gravador.yml` publica a cada push. Para soltar uma mudança:

@@ -7,5 +7,5 @@
 # primeira instalação para sempre.
 FROM node:22-alpine
 RUN apk add --no-cache ffmpeg
-COPY gravador.mjs /app/gravador.mjs
+COPY gravador.mjs envio.mjs /app/
 CMD ["node", "/app/gravador.mjs"]

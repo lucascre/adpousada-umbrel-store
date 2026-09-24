@@ -9,15 +9,20 @@ services:
   web:
     # Publicada pelo GitHub Actions deste repositório (ver Dockerfile). A tag
     # acompanha a versão do umbrel-app.yml.
-    image: ghcr.io/lucascre/adpousada-gravador:1.0.4
+    image: ghcr.io/lucascre/adpousada-gravador:1.1.0
     restart: on-failure
     stop_grace_period: 30s
+    # O envio de vídeos fala direto com o navegador (pela Cloudflare), sem o
+    # login do Umbrel no meio: quem protege é a permissão assinada pelo site.
+    ports:
+      - "8341:8341"
     volumes:
       - ${APP_DATA_DIR}/data:/data
-      # A pasta de cultos do acervo, que pertence ao copyparty. O Umbrel não
-      # deixa montar pasta de outro app pelas configurações (só /Home), então
-      # vai aqui. Gravar direto no disco dispensa a senha de escrita dele.
-      - ${UMBREL_ROOT}/app-data/copyparty/data/media/acervo/cultos:/acervo/cultos
+      # A pasta do AD Play, que pertence ao copyparty (é ele quem serve os
+      # vídeos). O Umbrel não deixa montar pasta de outro app pelas
+      # configurações (só /Home), então vai aqui. Gravar direto no disco
+      # dispensa a senha de escrita dele.
+      - ${UMBREL_ROOT}/app-data/copyparty/data/media/acervo:/acervo
     environment:
       PORT: 8080
       SITE_URL: https://www.adpousada.com.br
@@ -25,3 +30,5 @@ services:
       COPYPARTY_PASTA: acervo/cultos
       DIR_GRAVACOES: /data/gravacoes
       DESTINO_DIR: /acervo/cultos
+      ACERVO_DIR: /acervo
+      ENVIO_PORT: 8341

@@ -22,6 +22,7 @@ import { createReadStream } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { iniciarServidorDeEnvio } from "./envio.mjs";
 
 const cfg = {
   site: (process.env.SITE_URL || "https://www.adpousada.com.br").replace(/\/+$/, ""),
@@ -387,3 +388,4 @@ if (cfg.destino) {
     .catch((e) => registrar(`destino ${cfg.destino} NÃO gravável: ${e.message}`));
 }
 ciclo();
+iniciarServidorDeEnvio();
