@@ -13,8 +13,16 @@
 //   POST /envio?t=<permissão>                 { nome, tamanho } → { id, recebido }
 //   PUT  /envio/<id>?t=<permissão>&de=<byte>  pedaço            → { recebido }
 //   POST /envio/<id>/concluir?t=<permissão>                      → { caminho }
+//
+// E junta vídeos que já estão no AD Play num só — o culto gravado em
+// pedaços de 30 minutos vira um arquivo (ver juntar(), mais abaixo):
+//
+//   POST /envio/juntar?t=<permissão>   { arquivos: [caminho…], nome, apagarPartes }
+//                                                                → { id }
+//   GET  /envio/juntar/<id>?t=<permissão>                        → { estado, caminho?, duracao?, erro? }
 
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { spawn } from "node:child_process";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -89,7 +97,7 @@ function responder(res, status, corpo) {
     // A permissão é o que protege, não a origem: o painel roda no site e,
     // nos testes, em localhost.
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, PUT, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(corpo));
@@ -175,6 +183,107 @@ async function concluir(res, envio) {
   responder(res, 200, { caminho });
 }
 
+// ─── Juntar partes ───────────────────────────────────────────────────────────
+//
+// O servidor antigo gravava a live em arquivos de 30 minutos; um culto de
+// duas horas virava quatro vídeos. Aqui eles viram um MP4 só, na pasta da
+// permissão (cultos), pronto para streaming (faststart).
+//
+// Primeiro tenta sem converter (-c copy): segundos, e sem perder qualidade.
+// Se as partes não casarem (resolução ou codec diferentes), converte — aí
+// leva perto do tempo do vídeo, e o painel fica acompanhando.
+
+/** Trabalhos em andamento e recentes, pelo id. */
+const juntando = new Map();
+
+function rodarFfmpeg(args) {
+  return new Promise((resolve, reject) => {
+    const p = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...args]);
+    let erro = "";
+    p.stderr.on("data", (d) => (erro = (erro + d).slice(-1500)));
+    p.on("close", (c) => (c === 0 ? resolve() : reject(new Error(erro.trim() || `ffmpeg saiu com ${c}`))));
+  });
+}
+
+function duracaoDoVideo(arquivo) {
+  return new Promise((resolve) => {
+    const p = spawn("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", arquivo]);
+    let saida = "";
+    p.stdout.on("data", (d) => (saida += d));
+    p.on("close", () => resolve(Math.round(Number(saida.trim())) || 0));
+  });
+}
+
+async function iniciarJuntar(req, res, permissao) {
+  const corpo = await lerJson(req);
+  const destinoDir = pastaSegura(permissao.pasta);
+  const nome = nomeSeguro(corpo?.nome);
+  const lista = Array.isArray(corpo?.arquivos) ? corpo.arquivos.map((a) => pastaSegura(String(a))) : [];
+
+  if (!destinoDir || !nome || !nome.toLowerCase().endsWith(".mp4")) {
+    return responder(res, 400, { erro: "Nome do culto inválido." });
+  }
+  if (lista.length < 2 || lista.length > 40 || lista.some((a) => !a)) {
+    return responder(res, 400, { erro: "Escolha de 2 a 40 partes." });
+  }
+  for (const a of lista) {
+    const existe = await stat(a).then((s) => s.isFile(), () => false);
+    if (!existe) return responder(res, 400, { erro: `Parte não encontrada: ${basename(a)}` });
+  }
+
+  const id = randomBytes(12).toString("hex");
+  const trabalho = { estado: "juntando", modo: "rapido", inicio: Date.now() };
+  juntando.set(id, trabalho);
+  responder(res, 200, { id });
+
+  const dirTrabalho = join(dirControle, `juntar-${id}`);
+  try {
+    await mkdir(dirTrabalho, { recursive: true });
+    await mkdir(destinoDir, { recursive: true });
+    const txt = join(dirTrabalho, "lista.txt");
+    // Aspas simples no nome do arquivo quebram a lista do concat: viram '\''.
+    await writeFile(txt, lista.map((a) => `file '${a.replace(/'/g, "'\\''")}'`).join("\n"));
+
+    // Nunca sobrescreve: um culto com o mesmo nome vira "(2)".
+    const ponto = nome.lastIndexOf(".");
+    let final = nome;
+    for (let n = 2; await stat(join(destinoDir, final)).then(() => true, () => false); n++) {
+      final = `${nome.slice(0, ponto)} (${n})${nome.slice(ponto)}`;
+    }
+    const parcial = join(destinoDir, `.${final}.parcial`);
+
+    const base = ["-f", "concat", "-safe", "0", "-i", txt, "-map", "0:v?", "-map", "0:a?"];
+    try {
+      await rodarFfmpeg([...base, "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", "-f", "mp4", parcial]);
+    } catch (e) {
+      console.log(`[juntar] ${id} sem converter falhou (${e.message.slice(0, 200)}); convertendo`);
+      trabalho.modo = "convertendo";
+      await rodarFfmpeg([...base, "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+        "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-f", "mp4", parcial]);
+    }
+
+    await rename(parcial, join(destinoDir, final));
+    const duracao = await duracaoDoVideo(join(destinoDir, final));
+    if (corpo.apagarPartes) {
+      for (const a of lista) await rm(a, { force: true });
+    }
+
+    Object.assign(trabalho, {
+      estado: "pronto",
+      caminho: join(destinoDir, final).slice(raiz.length).replace(/^\/+/, ""),
+      duracao,
+    });
+    console.log(`${new Date().toISOString()} [juntar] ${lista.length} partes → ${trabalho.caminho} (${duracao}s)`);
+  } catch (e) {
+    Object.assign(trabalho, { estado: "erro", erro: e.message.slice(0, 300) });
+    console.log(`[juntar] ${id} erro: ${e.message}`);
+  } finally {
+    await rm(dirTrabalho, { recursive: true, force: true });
+    // Some da memória depois de uma hora: o painel já leu o resultado.
+    setTimeout(() => juntando.delete(id), 3600_000);
+  }
+}
+
 export function iniciarServidorDeEnvio() {
   if (!segredo) {
     console.log("[envio] GRAVADOR_TOKEN ausente — envio desligado.");
@@ -193,6 +302,13 @@ export function iniciarServidorDeEnvio() {
       if (!permissao) return responder(res, 401, { erro: "Permissão de envio vencida. Recarregue a página." });
 
       if (req.method === "POST" && partes.length === 1) return await iniciar(req, res, permissao);
+
+      if (partes[1] === "juntar") {
+        if (req.method === "POST" && partes.length === 2) return await iniciarJuntar(req, res, permissao);
+        const t = juntando.get(partes[2] ?? "");
+        if (req.method === "GET" && t) return responder(res, 200, t);
+        return responder(res, 404, { erro: "Trabalho não encontrado." });
+      }
 
       const envio = await lerEnvio(partes[1] ?? "");
       // O envio precisa ser da mesma pasta que a permissão libera.

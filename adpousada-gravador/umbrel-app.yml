@@ -2,7 +2,7 @@ manifestVersion: 1
 id: adpousada-gravador
 category: media
 name: AD Pousada Gravador
-version: "1.1.0"
+version: "1.2.0"
 tagline: Grava a live e recebe os envios do AD Play
 description: >-
   Grava a transmissão ao vivo da AD Pousada no próprio servidor e, ao parar,
@@ -24,6 +24,6 @@ gallery: []
 path: ""
 defaultUsername: ""
 defaultPassword: ""
-releaseNotes: "Recebe vídeos e imagens enviados pelo painel do AD Play, em pedaços que retomam se a conexão cair."
+releaseNotes: "Junta as partes de um culto gravado em pedaços (de 30 em 30 minutos) num vídeo só, a pedido do painel do AD Play."
 submitter: AD Pousada
 submission: https://github.com/lucascre/adpousada-umbrel-store
