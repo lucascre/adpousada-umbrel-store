@@ -20,13 +20,17 @@
 //   POST /envio/juntar?t=<permissão>   { arquivos: [caminho…], nome, apagarPartes }
 //                                                                → { id }
 //   GET  /envio/juntar/<id>?t=<permissão>                        → { estado, caminho?, duracao?, erro? }
+//
+// E entrega os vídeos para quem assiste (ver servirMidia()):
+//
+//   GET  /envio/midia/<caminho>?e=<expira>&s=<assinatura>        → o arquivo, com Range
 
 import { spawn } from "node:child_process";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { basename, join, normalize } from "node:path";
+import { basename, dirname, extname, join, normalize } from "node:path";
 
 const segredo = process.env.GRAVADOR_TOKEN || "";
 const raiz = process.env.ACERVO_DIR || "/acervo";
@@ -177,6 +181,7 @@ async function concluir(res, envio) {
 
   await rename(envio.parcial, join(envio.pasta, final));
   await rm(join(dirControle, `${envio.id}.json`), { force: true });
+  pedirFaststart(join(envio.pasta, final));
 
   const caminho = join(envio.pasta, final).slice(raiz.length).replace(/^\/+/, "");
   console.log(`${new Date().toISOString()} [envio] recebido ${caminho} (${envio.tamanho} bytes)`);
@@ -284,6 +289,160 @@ async function iniciarJuntar(req, res, permissao) {
   }
 }
 
+// ─── Servir os vídeos ────────────────────────────────────────────────────────
+//
+// Antes o vídeo passava pelo site (/api/midia na Vercel, nos EUA): cada
+// pedaço de 8 MB ia do Brasil até lá e voltava, levava de 12 a 29 s, e a
+// função morre aos 30. O player esperava, travava e às vezes desistia. Daqui
+// o arquivo sai do disco direto para quem assiste, numa conexão só.
+//
+// Quem libera é o site: ele assina (HMAC com o GRAVADOR_TOKEN) o caminho e o
+// prazo, só para membro aprovado. Link repassado vale só até o prazo.
+
+const TIPOS_MIDIA = {
+  ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+  ".mkv": "video/x-matroska", ".ts": "video/mp2t", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
+};
+
+function assinaturaDaMidia(caminho, expira) {
+  return createHmac("sha256", segredo).update(`midia|${caminho}|${expira}`).digest("base64url");
+}
+
+async function servirMidia(req, res, url) {
+  const cabecalhos = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Range",
+    "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+  };
+  const negar = (status, texto) => {
+    res.writeHead(status, { ...cabecalhos, "Content-Type": "text/plain; charset=utf-8" });
+    res.end(texto);
+  };
+
+  let caminho;
+  try {
+    caminho = url.pathname.split("/").slice(3).map(decodeURIComponent).join("/");
+  } catch {
+    return negar(400, "Endereço inválido.");
+  }
+  const expira = url.searchParams.get("e") || "";
+  const recebida = url.searchParams.get("s") || "";
+  const esperada = assinaturaDaMidia(caminho, expira);
+  const valida =
+    Number(expira) * 1000 > Date.now() &&
+    recebida.length === esperada.length &&
+    timingSafeEqual(Buffer.from(recebida), Buffer.from(esperada));
+  if (!valida) return negar(403, "Endereço expirado. Abra o vídeo pelo app de novo.");
+
+  const arquivo = pastaSegura(caminho);
+  const tipo = TIPOS_MIDIA[extname(caminho).toLowerCase()];
+  if (!arquivo || !tipo) return negar(404, "Não encontrado.");
+  const info = await stat(arquivo).catch(() => null);
+  if (!info?.isFile()) return negar(404, "Vídeo não encontrado.");
+
+  const total = info.size;
+  const faixa = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || "");
+  let inicio = 0;
+  let fim = total - 1;
+  if (faixa) {
+    if (faixa[1] === "" && faixa[2] !== "") {
+      inicio = Math.max(0, total - Number(faixa[2]));
+    } else {
+      inicio = Number(faixa[1] || 0);
+      if (faixa[2] !== "") fim = Math.min(Number(faixa[2]), total - 1);
+    }
+    if (inicio > fim || inicio >= total) {
+      res.writeHead(416, { ...cabecalhos, "Content-Range": `bytes */${total}` });
+      return res.end();
+    }
+  }
+
+  res.writeHead(faixa ? 206 : 200, {
+    ...cabecalhos,
+    "Content-Type": tipo,
+    "Accept-Ranges": "bytes",
+    "Content-Length": String(fim - inicio + 1),
+    ...(faixa ? { "Content-Range": `bytes ${inicio}-${fim}/${total}` } : {}),
+    // O endereço é assinado por pessoa e por prazo: nada de cache compartilhado.
+    "Cache-Control": "private, max-age=0, no-store",
+  });
+  if (req.method === "HEAD") return res.end();
+
+  const leitura = createReadStream(arquivo, { start: inicio, end: fim, highWaterMark: 1024 * 1024 });
+  leitura.pipe(res);
+  req.on("close", () => leitura.destroy());
+}
+
+// ─── Índice no começo (faststart) ────────────────────────────────────────────
+//
+// MP4 com o índice (moov) no fim obriga o player a baixar o fim do arquivo
+// antes de mostrar o primeiro quadro — pela internet, é a espera que parece
+// travamento ao escolher um episódio. Todo MP4 que chega é conferido e, se
+// preciso, reescrito sem converter nada (-c copy, alguns segundos).
+
+async function indiceNoFim(arquivo) {
+  const f = await open(arquivo, "r").catch(() => null);
+  if (!f) return false;
+  try {
+    const { size } = await f.stat();
+    const cab = Buffer.alloc(16);
+    let pos = 0;
+    let viuMdat = false;
+    for (let i = 0; i < 64 && pos + 8 <= size; i++) {
+      await f.read(cab, 0, 16, pos);
+      let tamanho = cab.readUInt32BE(0);
+      const tipo = cab.toString("latin1", 4, 8);
+      if (tamanho === 1) tamanho = Number(cab.readBigUInt64BE(8));
+      if (tamanho === 0) tamanho = size - pos;
+      if (tamanho < 8) return false;
+      if (tipo === "mdat") viuMdat = true;
+      if (tipo === "moov") return viuMdat;
+      pos += tamanho;
+    }
+    return false;
+  } finally {
+    await f.close();
+  }
+}
+
+const filaFaststart = [];
+let reescrevendo = false;
+
+function pedirFaststart(arquivo) {
+  if (!/\.(mp4|m4v|mov)$/i.test(arquivo) || filaFaststart.includes(arquivo)) return;
+  filaFaststart.push(arquivo);
+  if (!reescrevendo) processarFaststart();
+}
+
+async function processarFaststart() {
+  reescrevendo = true;
+  while (filaFaststart.length) {
+    const arquivo = filaFaststart.shift();
+    try {
+      if (!(await indiceNoFim(arquivo))) continue;
+      const temp = join(dirname(arquivo), `.${basename(arquivo)}.faststart`);
+      await rodarFfmpeg(["-i", arquivo, "-map", "0", "-c", "copy", "-movflags", "+faststart", "-f", "mp4", temp]);
+      await rename(temp, arquivo);
+      console.log(`${new Date().toISOString()} [faststart] índice movido para o começo: ${arquivo.slice(raiz.length)}`);
+    } catch (e) {
+      console.log(`[faststart] ${arquivo}: ${e.message.slice(0, 200)}`);
+    }
+  }
+  reescrevendo = false;
+}
+
+/** Ao ligar: confere os vídeos que já estão no AD Play. */
+async function varrerAcervo(dir = raiz, nivel = 0) {
+  if (nivel > 6) return;
+  const itens = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const item of itens) {
+    if (item.name.startsWith(".")) continue;
+    const caminho = join(dir, item.name);
+    if (item.isDirectory()) await varrerAcervo(caminho, nivel + 1);
+    else if (/\.(mp4|m4v|mov)$/i.test(item.name) && (await indiceNoFim(caminho))) pedirFaststart(caminho);
+  }
+}
+
 export function iniciarServidorDeEnvio() {
   if (!segredo) {
     console.log("[envio] GRAVADOR_TOKEN ausente — envio desligado.");
@@ -297,6 +456,11 @@ export function iniciarServidorDeEnvio() {
       const url = new URL(req.url, "http://x");
       const partes = url.pathname.split("/").filter(Boolean); // ["envio", id?, "concluir"?]
       if (partes[0] !== "envio") return responder(res, 404, { erro: "Não encontrado." });
+
+      // O vídeo para quem assiste: a assinatura vem na própria URL.
+      if (partes[1] === "midia" && (req.method === "GET" || req.method === "HEAD")) {
+        return await servirMidia(req, res, url);
+      }
 
       const permissao = conferir(url.searchParams.get("t"));
       if (!permissao) return responder(res, 401, { erro: "Permissão de envio vencida. Recarregue a página." });
@@ -326,5 +490,8 @@ export function iniciarServidorDeEnvio() {
       console.log(`[envio] erro: ${e.message}`);
       if (!res.headersSent) responder(res, 500, { erro: "Erro no servidor." });
     }
-  }).listen(porta, () => console.log(`${new Date().toISOString()} [envio] ouvindo em :${porta}`));
+  }).listen(porta, () => {
+    console.log(`${new Date().toISOString()} [envio] ouvindo em :${porta}`);
+    varrerAcervo().catch((e) => console.log(`[faststart] varredura: ${e.message}`));
+  });
 }
